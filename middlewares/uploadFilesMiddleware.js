@@ -84,7 +84,6 @@ const processFileUpload = async (file, body, user) => {
 
   // Check if the media type is a video
   if (mediaType === 'video') {
-    // Upload to Google Cloud Storage
     const gcsFileName = `videos/${Date.now()}-${encodeURIComponent(originalname)}`;
     const videoBlob = cloudBucket.file(gcsFileName);
     const videoStreamUpload = videoBlob.createWriteStream({
@@ -111,6 +110,11 @@ const processFileUpload = async (file, body, user) => {
                 owner,
                 mediaType,
               };
+
+              if (!mediaData.url) {
+                throw new Error('Media URL is missing.');
+              }
+
               const mediaId = await createOrUpdateMedia(mediaData);
               resolve(mediaId);
             } catch (err) {
@@ -122,7 +126,7 @@ const processFileUpload = async (file, body, user) => {
       );
     });
   } else {
-    // Upload non-video files to MongoDB (GridFS or similar)
+    // For non-video files
     const uploadStream = getBucket().openUploadStream(originalname, {
       contentType: mimetype,
       metadata: { mediaType },
@@ -146,6 +150,11 @@ const processFileUpload = async (file, body, user) => {
                 owner,
                 mediaType,
               };
+
+              if (!mediaData.url) {
+                throw new Error('Media URL is missing.');
+              }
+
               const mediaId = await createOrUpdateMedia(mediaData);
               resolve(mediaId);
             } catch (err) {
@@ -159,6 +168,7 @@ const processFileUpload = async (file, body, user) => {
   }
 };
 
+
 const dynamicUpload = (req, res, next) => {
   const fieldName = req.body.fieldName || 'file';
   const multerUpload = upload.single(fieldName);
@@ -170,23 +180,24 @@ const dynamicUpload = (req, res, next) => {
       return;
     }
 
-
     try {
       if (req.file) {
         const mediaId = await processFileUpload(req.file, req.body, req.user);
-        req.media = await Media.findById(mediaId); // Retrieve media to attach to request
+        req.media = await Media.findById(mediaId);
+        res.status(201).json({ message: 'File uploaded successfully', media: req.media });
       } else if (Object.keys(req.body).length > 0 && req.body.url) {
         const mediaId = await createOrUpdateMedia(req.body);
-        req.media = await Media.findById(mediaId); // Retrieve media to attach to request
+        req.media = await Media.findById(mediaId);
+        res.status(201).json({ message: 'File data updated successfully', media: req.media });
       } else {
+        res.status(400).json({ message: 'No file or URL provided.' });
       }
-
-      next();
     } catch (error) {
       console.error('Error in dynamicUpload middleware:', error);
       res.status(500).json({ message: 'Internal server error', error: error.message });
     }
   });
 };
+
 
 module.exports = { upload, mediaExtensions, dynamicUpload, getMediaType, getMimeType };
