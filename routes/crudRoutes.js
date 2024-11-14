@@ -13,7 +13,7 @@ const createCrudRoutes = (controller) => {
   router.put('/bulk', controller.updateManyItems);
   router.patch('/:_id', controller.updateItem);
   router.patch('/bulk', controller.updateManyItems);
-  router.delete('/:_id', controller.deleteItem);
+  router.delete('/:id', controller.deleteItem);
   router.delete('/bulk', controller.deleteManyItems);
 
   return router;
