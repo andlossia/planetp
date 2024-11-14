@@ -19,8 +19,8 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); 
 
 
-app.use(express.json({ limit: '1024mb', type: 'application/json; charset=UTF-8' }));
-app.use(express.urlencoded({ limit: '1024mb', extended: true, parameterLimit: 100000, type: 'application/x-www-form-urlencoded; charset=UTF-8' }));
+app.use(bodyParser.json({ limit: '1024mb' }));
+app.use(bodyParser.urlencoded({ limit: '1024mb', extended: true }));
 app.use(responseHandler);
 
 
