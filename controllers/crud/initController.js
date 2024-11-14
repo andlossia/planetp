@@ -234,7 +234,7 @@ const initController = (Model, modelName, customMethods = [], uniqueFields = [])
       authorizeOwnerOrRole(Model, modelName),
       async (req, res) => {
         try {
-          const item = await Model.findByIdAndDelete(req.params._id);
+          const item = await Model.findByIdAndDelete(req.params.id);
           if (!item) {
             return res.status(404).json({ message: `${modelName} not found` });
           }
