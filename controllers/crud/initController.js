@@ -94,8 +94,8 @@ const initController = (Model, modelName, customMethods = [], uniqueFields = [])
   return {
     createItem: [
       authenticate,
-      dynamicUpload,
       validateRequest([]),
+      dynamicUpload,
       checkUniqueFields(uniqueFields, Model, modelName),
       async (req, res) => {
         try {
@@ -110,7 +110,9 @@ const initController = (Model, modelName, customMethods = [], uniqueFields = [])
           const linkedObjectIds = await createOrUpdateLinkedObjects(linkedObjects, Model);
           const itemData = { ...req.body, ...linkedObjectIds, owner };
 
-          if (req.media) { itemData.media = req.media._id }
+          if (req.media) { 
+            itemData.media = req.media._id;
+          }
 
           const item = await Model.create(itemData);
 
@@ -249,6 +251,7 @@ const initController = (Model, modelName, customMethods = [], uniqueFields = [])
         }
       }
     ],
+
 
     deleteManyItems: [
       authenticate,
