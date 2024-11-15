@@ -86,6 +86,7 @@ const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
     metadata: {
       contentType: mimetype,
     },
+    timeout: 600000,
   });
 
   return new Promise((resolve, reject) => {
