@@ -82,11 +82,11 @@ const processFileUpload = async (file, body, user) => {
   const mediaType = getMediaType(ext);
   const owner = user ? user.id : null;
 
-  // Check if the media type is a video
-  if (mediaType === 'video') {
-    const gcsFileName = `videos/${Date.now()}-${encodeURIComponent(originalname)}`;
-    const videoBlob = cloudBucket.file(gcsFileName);
-    const videoStreamUpload = videoBlob.createWriteStream({
+  // Function to upload to Google Cloud Storage as a fallback
+  const uploadToGoogleCloud = async (buffer, originalname, mimetype) => {
+    const gcsFileName = `media/${mediaType}s/${Date.now()}-${encodeURIComponent(originalname)}`;
+    const mediaBlob = cloudBucket.file(gcsFileName);
+    const mediaStreamUpload = mediaBlob.createWriteStream({
       metadata: {
         contentType: mimetype,
       },
@@ -95,79 +95,98 @@ const processFileUpload = async (file, body, user) => {
     return new Promise((resolve, reject) => {
       pipeline(
         Readable.from(buffer),
-        videoStreamUpload,
-        async (err) => {
+        mediaStreamUpload,
+        (err) => {
           if (err) {
-            console.error('Error uploading video to GCS:', err);
-            reject(new Error('Error uploading video.'));
-          } else {
-            try {
-              const mediaData = {
-                fileName: body.fileName || originalname,
-                altText: body.altText || '',
-                slug: `video-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                url: `https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`,
-                owner,
-                mediaType,
-              };
-
-              if (!mediaData.url) {
-                throw new Error('Media URL is missing.');
-              }
-
-              const mediaId = await createOrUpdateMedia(mediaData);
-              resolve(mediaId);
-            } catch (err) {
-              console.error('Error saving media to MongoDB:', err);
-              reject(new Error('Error saving media.'));
-            }
-          }
-        }
-      );
-    });
-  } else {
-    // For non-video files
-    const uploadStream = getBucket().openUploadStream(originalname, {
-      contentType: mimetype,
-      metadata: { mediaType },
-    });
-
-    return new Promise((resolve, reject) => {
-      pipeline(
-        Readable.from(buffer),
-        uploadStream,
-        async (err) => {
-          if (err) {
-            console.error('Error uploading file:', err);
+            console.error('Error uploading file to GCS:', err);
             reject(new Error('Error uploading file.'));
           } else {
-            try {
-              const mediaData = {
-                fileName: body.fileName || originalname,
-                altText: body.altText || '',
-                slug: `${mediaType}-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                url: `/uploads/${mediaType}/${originalname}`,
-                owner,
-                mediaType,
-              };
-
-              if (!mediaData.url) {
-                throw new Error('Media URL is missing.');
-              }
-
-              const mediaId = await createOrUpdateMedia(mediaData);
-              resolve(mediaId);
-            } catch (err) {
-              console.error('Error saving media:', err);
-              reject(new Error('Error saving media.'));
-            }
+            resolve(`https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`);
           }
         }
       );
     });
+  };
+
+  if (mediaType === 'video') {
+    // Send video directly to Google Cloud Storage
+    try {
+      const googleCloudUrl = await uploadToGoogleCloud(buffer, originalname, mimetype);
+      const videoData = {
+        fileName: body.fileName || originalname,
+        altText: body.altText || '',
+        slug: `video-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        url: googleCloudUrl,
+        owner,
+        mediaType,
+      };
+
+      const mediaId = await createOrUpdateMedia(videoData);
+      return mediaId;
+    } catch (error) {
+      console.error('Failed to upload video to Google Cloud:', error);
+      throw new Error('Failed to upload video.');
+    }
+  } else {
+    // For non-video files, try uploading to MongoDB first
+    try {
+      const uploadStream = getBucket().openUploadStream(originalname, {
+        contentType: mimetype,
+        metadata: { mediaType },
+      });
+
+      await new Promise((resolve, reject) => {
+        pipeline(
+          Readable.from(buffer),
+          uploadStream,
+          (err) => {
+            if (err) {
+              console.error('Error uploading file to MongoDB:', err);
+              reject(new Error('Error uploading file.'));
+            } else {
+              resolve();
+            }
+          }
+        );
+      });
+
+      // Save media data in MongoDB
+      const mediaData = {
+        fileName: body.fileName || originalname,
+        altText: body.altText || '',
+        slug: `${mediaType}-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        url: `/uploads/${mediaType}/${originalname}`,
+        owner,
+        mediaType,
+      };
+
+      const mediaId = await createOrUpdateMedia(mediaData);
+      return mediaId;
+
+    } catch (error) {
+      console.error('MongoDB failed, falling back to Google Cloud Storage:', error);
+
+      // Fallback: Upload to Google Cloud Storage if MongoDB fails
+      const googleCloudUrl = await uploadToGoogleCloud(buffer, originalname, mimetype);
+      const fallbackMediaData = {
+        fileName: body.fileName || originalname,
+        altText: body.altText || '',
+        slug: `${mediaType}-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        url: googleCloudUrl,
+        owner,
+        mediaType,
+      };
+
+      try {
+        const mediaId = await createOrUpdateMedia(fallbackMediaData);
+        return mediaId;
+      } catch (fallbackError) {
+        console.error('Failed to save Google Cloud URL in MongoDB:', fallbackError);
+        throw new Error('Failed to upload media to both MongoDB and Google Cloud Storage.');
+      }
+    }
   }
 };
-
 
 const dynamicUpload = (req, res, next) => {
   const fieldName = req.body.fieldName || 'file';
@@ -185,12 +204,12 @@ const dynamicUpload = (req, res, next) => {
         const mediaId = await processFileUpload(req.file, req.body, req.user);
         req.media = await Media.findById(mediaId);
         res.status(201).json({ message: 'File uploaded successfully', media: req.media });
-      } else if (Object.keys(req.body).length > 0 && req.body.url) {
+      } else if (req.body.url) {
         const mediaId = await createOrUpdateMedia(req.body);
         req.media = await Media.findById(mediaId);
         res.status(201).json({ message: 'File data updated successfully', media: req.media });
       } else {
-        res.status(400).json({ message: 'No file or URL provided.' });
+        next();
       }
     } catch (error) {
       console.error('Error in dynamicUpload middleware:', error);
@@ -198,6 +217,5 @@ const dynamicUpload = (req, res, next) => {
     }
   });
 };
-
 
 module.exports = { upload, mediaExtensions, dynamicUpload, getMediaType, getMimeType };
