@@ -18,7 +18,6 @@ const videoStorage = new Storage({
   },
 });
 
-
 const cloudBucket = videoStorage.bucket(process.env.BUCKET_NAME);
 
 const mediaExtensions = {
@@ -42,7 +41,6 @@ const mediaTypeMap = Object.entries(mediaExtensions).reduce((acc, [type, exts]) 
 
 const getMediaType = (ext) => mediaTypeMap[ext] || 'unknown';
 
-
 const getMimeType = (mediaType) => mimeTypes[mediaType] || 'application/octet-stream';
 
 const fileFilter = (req, file, cb) => {
@@ -63,9 +61,7 @@ const upload = multer({
 });
 
 const createOrUpdateMedia = async (mediaData) => {
-
   const existingMedia = await Media.findOne({ url: mediaData.url });
-
   if (existingMedia) {
     await Media.updateOne({ _id: existingMedia._id }, mediaData);
     return existingMedia._id;
@@ -76,42 +72,42 @@ const createOrUpdateMedia = async (mediaData) => {
   }
 };
 
+// New uploadToGoogleCloud function using streaming
+const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
+  const gcsFileName = `media/videos/${Date.now()}-${encodeURIComponent(originalname)}`;
+  const mediaBlob = cloudBucket.file(gcsFileName);
+  const mediaStreamUpload = mediaBlob.createWriteStream({
+    metadata: {
+      contentType: mimetype,
+    },
+  });
+
+  return new Promise((resolve, reject) => {
+    pipeline(
+      fileStream,
+      mediaStreamUpload,
+      (err) => {
+        if (err) {
+          console.error('Error uploading file to GCS:', err);
+          reject(new Error('Error uploading file.'));
+        } else {
+          resolve(`https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`);
+        }
+      }
+    );
+  });
+};
+
 const processFileUpload = async (file, body, user) => {
-  const { mimetype, buffer, originalname } = file;
+  const { mimetype, stream, originalname } = file;
   const ext = path.extname(originalname).toLowerCase();
   const mediaType = getMediaType(ext);
   const owner = user ? user.id : null;
 
-  // Function to upload to Google Cloud Storage as a fallback
-  const uploadToGoogleCloud = async (buffer, originalname, mimetype) => {
-    const gcsFileName = `media/${mediaType}s/${Date.now()}-${encodeURIComponent(originalname)}`;
-    const mediaBlob = cloudBucket.file(gcsFileName);
-    const mediaStreamUpload = mediaBlob.createWriteStream({
-      metadata: {
-        contentType: mimetype,
-      },
-    });
-
-    return new Promise((resolve, reject) => {
-      pipeline(
-        Readable.from(buffer),
-        mediaStreamUpload,
-        (err) => {
-          if (err) {
-            console.error('Error uploading file to GCS:', err);
-            reject(new Error('Error uploading file.'));
-          } else {
-            resolve(`https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`);
-          }
-        }
-      );
-    });
-  };
-
   if (mediaType === 'video') {
-    // Send video directly to Google Cloud Storage
     try {
-      const googleCloudUrl = await uploadToGoogleCloud(buffer, originalname, mimetype);
+      // Use streaming version for uploading video
+      const googleCloudUrl = await uploadToGoogleCloud(stream, originalname, mimetype);
       const videoData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
@@ -128,7 +124,6 @@ const processFileUpload = async (file, body, user) => {
       throw new Error('Failed to upload video.');
     }
   } else {
-    // For non-video files, try uploading to MongoDB first
     try {
       const uploadStream = getBucket().openUploadStream(originalname, {
         contentType: mimetype,
@@ -137,7 +132,7 @@ const processFileUpload = async (file, body, user) => {
 
       await new Promise((resolve, reject) => {
         pipeline(
-          Readable.from(buffer),
+          Readable.from(stream),
           uploadStream,
           (err) => {
             if (err) {
@@ -150,7 +145,6 @@ const processFileUpload = async (file, body, user) => {
         );
       });
 
-      // Save media data in MongoDB
       const mediaData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
@@ -162,12 +156,10 @@ const processFileUpload = async (file, body, user) => {
 
       const mediaId = await createOrUpdateMedia(mediaData);
       return mediaId;
-
     } catch (error) {
-      console.error('MongoDB failed, falling back to Google Cloud Storage:', error);
+      console.error('Error uploading file to MongoDB, falling back to Google Cloud Storage:', error);
 
-      // Fallback: Upload to Google Cloud Storage if MongoDB fails
-      const googleCloudUrl = await uploadToGoogleCloud(buffer, originalname, mimetype);
+      const googleCloudUrl = await uploadToGoogleCloud(stream, originalname, mimetype);
       const fallbackMediaData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
