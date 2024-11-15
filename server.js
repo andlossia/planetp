@@ -15,6 +15,11 @@ const corsOptions = {
   credentials: true 
 };
 
+app.use((req, res, next) => {
+  req.setTimeout(0); 
+  next();
+});
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); 
 
