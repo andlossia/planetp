@@ -8,8 +8,10 @@ const { getBucket } = require('../database');
 
 dotenv.config();
 
+// Parse Google Cloud credentials from environment variables
 const credentials = JSON.parse(Buffer.from(process.env.KEYFILENAME, 'base64').toString('utf8'));
 
+// Google Cloud Storage initialization
 const videoStorage = new Storage({
   projectId: credentials.project_id,
   credentials: {
@@ -20,6 +22,7 @@ const videoStorage = new Storage({
 
 const cloudBucket = videoStorage.bucket(process.env.BUCKET_NAME);
 
+// Supported media types and extensions
 const mediaExtensions = {
   image: ['.png', '.jpg', '.gif', '.jpeg', '.bmp', '.svg', '.webp'],
   video: ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'],
@@ -34,15 +37,16 @@ const mimeTypes = {
   file: 'application/octet-stream',
 };
 
+// Map extensions to media types
 const mediaTypeMap = Object.entries(mediaExtensions).reduce((acc, [type, exts]) => {
   exts.forEach(ext => acc[ext] = type);
   return acc;
 }, {});
 
 const getMediaType = (ext) => mediaTypeMap[ext] || 'unknown';
-
 const getMimeType = (mediaType) => mimeTypes[mediaType] || 'application/octet-stream';
 
+// Multer configuration for in-memory storage
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   if (Object.values(mediaExtensions).flat().includes(ext)) {
@@ -56,12 +60,14 @@ const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB limit
   fileFilter,
 });
 
+// Helper to create or update media in MongoDB
 const createOrUpdateMedia = async (mediaData) => {
   const existingMedia = await Media.findOne({ url: mediaData.url });
+
   if (existingMedia) {
     await Media.updateOne({ _id: existingMedia._id }, mediaData);
     return existingMedia._id;
@@ -72,7 +78,7 @@ const createOrUpdateMedia = async (mediaData) => {
   }
 };
 
-// New uploadToGoogleCloud function using streaming
+// Function to upload a file to Google Cloud Storage
 const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
   const gcsFileName = `media/videos/${Date.now()}-${encodeURIComponent(originalname)}`;
   const mediaBlob = cloudBucket.file(gcsFileName);
@@ -98,16 +104,18 @@ const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
   });
 };
 
+// Main function to process file uploads
 const processFileUpload = async (file, body, user) => {
-  const { mimetype, stream, originalname } = file;
+  const { mimetype, buffer, originalname } = file; // Use buffer directly from multer
   const ext = path.extname(originalname).toLowerCase();
   const mediaType = getMediaType(ext);
   const owner = user ? user.id : null;
 
   if (mediaType === 'video') {
     try {
-      // Use streaming version for uploading video
-      const googleCloudUrl = await uploadToGoogleCloud(stream, originalname, mimetype);
+      // Convert buffer to a readable stream
+      const fileStream = Readable.from(buffer);
+      const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
       const videoData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
@@ -132,7 +140,7 @@ const processFileUpload = async (file, body, user) => {
 
       await new Promise((resolve, reject) => {
         pipeline(
-          Readable.from(stream),
+          Readable.from(buffer), // Convert buffer to a stream
           uploadStream,
           (err) => {
             if (err) {
@@ -159,7 +167,8 @@ const processFileUpload = async (file, body, user) => {
     } catch (error) {
       console.error('Error uploading file to MongoDB, falling back to Google Cloud Storage:', error);
 
-      const googleCloudUrl = await uploadToGoogleCloud(stream, originalname, mimetype);
+      const fileStream = Readable.from(buffer); // Convert buffer to stream for fallback
+      const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
       const fallbackMediaData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
@@ -180,6 +189,7 @@ const processFileUpload = async (file, body, user) => {
   }
 };
 
+// Middleware to dynamically handle uploads
 const dynamicUpload = (req, res, next) => {
   const fieldName = req.body.fieldName || 'file';
   const multerUpload = upload.single(fieldName);
