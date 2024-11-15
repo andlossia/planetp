@@ -20,9 +20,9 @@ const courseSchema = new Schema({
     thumbnail: {type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
     sections: [{type: Schema.Types.ObjectId, ref: 'Section'}],
     reviews: [{type: Schema.Types.ObjectId, ref: 'Review'}],
-    prerequisites: [{type: Schema.Types.ObjectId, ref: 'Course'}],
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
+    prerequisites: [{type: Schema.Types.ObjectId, ref: 'Course'}],
 }, {
     timestamps: true,
 });

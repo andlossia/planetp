@@ -14,7 +14,9 @@ const DogSchema = new Schema({
     diet: { type: String },
     training: { type: String },
     healthIssues: { type: String },
-    uniqueBehaviors: { type: String }
+    uniqueBehaviors: { type: String },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
   }, { timestamps: true });
 
 applyToJSON(DogSchema);

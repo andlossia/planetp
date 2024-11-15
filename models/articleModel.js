@@ -41,6 +41,8 @@ const articleSchema = new Schema({
         min: [0, 'Likes cannot be negative'] 
     },
     media: { type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
 }, {
     timestamps: true,
 });

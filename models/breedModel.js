@@ -14,7 +14,9 @@ const breedSchema = new Schema({
     senseOfSmell: { type: String },
     coat: { type: String},
     trainability: { type: String},
-    size: { type: String }
+    size: { type: String },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
   }
 }, {
   timestamps: true,

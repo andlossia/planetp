@@ -10,6 +10,8 @@ const CertificateSchema = new Schema({
     media: { type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
     course: { type: Schema.Types.ObjectId, ref: 'Course' },
     participant: { type: Schema.Types.ObjectId, ref: 'User' },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
   
 }, {
     timestamps: true,

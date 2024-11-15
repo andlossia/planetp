@@ -9,6 +9,7 @@ const mediaSchema = new Schema({
   slug: { type: String, },
   url: { type: String,  },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  
 
 }, {
   timestamps: true,

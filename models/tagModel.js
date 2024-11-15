@@ -8,6 +8,8 @@ const tagSchema = new Schema({
     description: { type: String},
     slug: { type: String},
     media: { type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
 }, {
     timestamps: true,
 });

@@ -22,6 +22,8 @@ const lessondSchema = new Schema({
     tags: [{type: mongoose.Schema.Types.ObjectId, ref: 'Tag' }],
     thumbnail: { type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
     comments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }],
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
 }, {
     timestamps: true,
 });

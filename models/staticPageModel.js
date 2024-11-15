@@ -9,6 +9,8 @@ const staticPageSchema = new Schema({
     slug: { type: String, required: true },
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     media: { type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
 }, {
     timestamps: true,
 });

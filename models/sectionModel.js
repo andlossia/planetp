@@ -13,6 +13,8 @@ const sectionSchema = new Schema({
     thumbnail: { type: mongoose.Schema.Types.ObjectId, ref: 'Media' },
     lessons: [{ type: Schema.Types.ObjectId, ref: 'Lesson' }],
     comments: [{ type: Schema.Types.ObjectId, ref: 'Comment' }],
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
 }, {
     timestamps: true,
 });
