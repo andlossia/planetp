@@ -79,31 +79,30 @@ const createOrUpdateMedia = async (mediaData) => {
 };
 
 // Function to upload a file to Google Cloud Storage
-const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
+const uploadToGoogleCloud = async (file, originalname, mimetype) => {
   const gcsFileName = `media/videos/${Date.now()}-${encodeURIComponent(originalname)}`;
   const mediaBlob = cloudBucket.file(gcsFileName);
+  
   const mediaStreamUpload = mediaBlob.createWriteStream({
     metadata: {
       contentType: mimetype,
     },
-    timeout: 600000,
+    resumable: true, // Enable resumable uploads for large files
   });
 
   return new Promise((resolve, reject) => {
-    pipeline(
-      fileStream,
-      mediaStreamUpload,
-      (err) => {
-        if (err) {
-          console.error('Error uploading file to GCS:', err);
-          reject(new Error('Error uploading file.'));
-        } else {
-          resolve(`https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`);
-        }
-      }
-    );
+    file.stream.pipe(mediaStreamUpload)
+      .on('error', (err) => {
+        console.error('Error uploading to Google Cloud:', err);
+        reject(new Error('Failed to upload video.'));
+      })
+      .on('finish', () => {
+        const publicUrl = `https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`;
+        resolve(publicUrl);
+      });
   });
 };
+
 
 // Main function to process file uploads
 const processFileUpload = async (file, body, user) => {
@@ -198,27 +197,22 @@ const dynamicUpload = (req, res, next) => {
   multerUpload(req, res, async (err) => {
     if (err) {
       console.error('Error in dynamicUpload middleware:', err);
-      res.status(500).json({ message: 'Internal server error', error: err.message });
-      return;
+      return res.status(500).json({ message: 'Upload failed', error: err.message });
     }
 
     try {
       if (req.file) {
-        const mediaId = await processFileUpload(req.file, req.body, req.user);
-        req.media = await Media.findById(mediaId);
-        res.status(201).json({ message: 'File uploaded successfully', media: req.media });
-      } else if (req.body.url) {
-        const mediaId = await createOrUpdateMedia(req.body);
-        req.media = await Media.findById(mediaId);
-        res.status(201).json({ message: 'File data updated successfully', media: req.media });
+        const googleCloudUrl = await uploadToGoogleCloud(req.file, req.file.originalname, req.file.mimetype);
+        res.status(201).json({ message: 'File uploaded successfully', url: googleCloudUrl });
       } else {
         next();
       }
-    } catch (error) {
-      console.error('Error in dynamicUpload middleware:', error);
-      res.status(500).json({ message: 'Internal server error', error: error.message });
+    } catch (uploadError) {
+      console.error('Upload process failed:', uploadError);
+      res.status(500).json({ message: 'Internal server error', error: uploadError.message });
     }
   });
 };
+
 
 module.exports = { upload, mediaExtensions, dynamicUpload, getMediaType, getMimeType };
