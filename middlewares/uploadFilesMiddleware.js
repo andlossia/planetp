@@ -1,7 +1,8 @@
 const { Readable, pipeline } = require('stream');
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
-const fs = require('fs').promises;
+const fs = require('fs'); 
+const fsPromises = require('fs').promises; 
 const dotenv = require('dotenv');
 const multer = require('multer');
 const Media = require('../models/mediaModel');
@@ -182,7 +183,7 @@ const processFileUpload = async (file, body, user) => {
 
       await new Promise((resolve, reject) => {
         pipeline(
-          buffer ? Readable.from(buffer) : fs.createReadStream(file.path),
+          buffer ? Readable.from(buffer) : fs.createReadStream(file.path), 
           uploadStream,
           (err) => {
             if (err) {
