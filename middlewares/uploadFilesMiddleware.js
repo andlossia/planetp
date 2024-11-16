@@ -1,6 +1,7 @@
 const { Readable, pipeline } = require('stream');
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
+const fs = require('fs').promises;
 const dotenv = require('dotenv');
 const multer = require('multer');
 const Media = require('../models/mediaModel');
@@ -11,7 +12,7 @@ dotenv.config();
 // Parse Google Cloud credentials from environment variables
 const credentials = JSON.parse(Buffer.from(process.env.KEYFILENAME, 'base64').toString('utf8'));
 
-// Google Cloud Storage initialization
+// Initialize Google Cloud Storage
 const videoStorage = new Storage({
   projectId: credentials.project_id,
   credentials: {
@@ -22,7 +23,7 @@ const videoStorage = new Storage({
 
 const cloudBucket = videoStorage.bucket(process.env.BUCKET_NAME);
 
-// Supported media types and extensions
+// Define supported media types and their extensions
 const mediaExtensions = {
   image: ['.png', '.jpg', '.gif', '.jpeg', '.bmp', '.svg', '.webp'],
   video: ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'],
@@ -30,6 +31,7 @@ const mediaExtensions = {
   file: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv'],
 };
 
+// Define MIME types for media types
 const mimeTypes = {
   image: 'image/jpeg',
   video: 'video/mp4',
@@ -37,7 +39,7 @@ const mimeTypes = {
   file: 'application/octet-stream',
 };
 
-// Map extensions to media types
+// Map extensions to their respective media types
 const mediaTypeMap = Object.entries(mediaExtensions).reduce((acc, [type, exts]) => {
   exts.forEach(ext => acc[ext] = type);
   return acc;
@@ -46,25 +48,62 @@ const mediaTypeMap = Object.entries(mediaExtensions).reduce((acc, [type, exts]) 
 const getMediaType = (ext) => mediaTypeMap[ext] || 'unknown';
 const getMimeType = (mediaType) => mimeTypes[mediaType] || 'application/octet-stream';
 
-// Multer configuration for in-memory storage
-const fileFilter = (req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (Object.values(mediaExtensions).flat().includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type.'));
-  }
+// Define file size limits per media type
+const fileSizeLimits = {
+  image: 50 * 1024 * 1024, // 50MB
+  video: 2 * 1024 * 1024 * 1024, // 2GB
 };
 
-const storage = multer.memoryStorage();
+// Multer file filter to validate file type and size
+const fileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const mediaType = getMediaType(ext);
 
+  if (!Object.values(mediaExtensions).flat().includes(ext)) {
+    return cb(new Error('Invalid file type.'));
+  }
+
+  const sizeLimit = fileSizeLimits[mediaType];
+  if (req.file.size > sizeLimit) {
+    return cb(new Error(`File size exceeds the limit for ${mediaType}.`));
+  }
+
+  cb(null, true);
+};
+
+// Configure Multer storage to save files temporarily on disk
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const uploadPath = path.join('uploads', req.user.id || 'default');
+    await fs.mkdir(uploadPath, { recursive: true });
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${sanitizeFilename(file.originalname)}`);
+  },
+});
+
+// Initialize Multer with storage and file filter
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB limit
+  limits: { fileSize: Math.max(...Object.values(fileSizeLimits)) },
   fileFilter,
 });
 
-// Helper to create or update media in MongoDB
+// Sanitize filenames by removing unsafe characters
+const sanitizeFilename = (name) => name.replace(/[^a-zA-Z0-9.-_]/g, '_');
+
+// Delete temporary files after processing
+const cleanupFile = async (filePath) => {
+  try {
+    await fs.unlink(filePath);
+    console.log(`Temporary file ${filePath} deleted.`);
+  } catch (err) {
+    console.error(`Failed to delete file ${filePath}:`, err.message);
+  }
+};
+
+// Create or update media metadata in MongoDB
 const createOrUpdateMedia = async (mediaData) => {
   const existingMedia = await Media.findOne({ url: mediaData.url });
 
@@ -78,44 +117,40 @@ const createOrUpdateMedia = async (mediaData) => {
   }
 };
 
-// Function to upload a file to Google Cloud Storage
-const uploadToGoogleCloud = async (file, originalname, mimetype) => {
-  const gcsFileName = `media/videos/${Date.now()}-${encodeURIComponent(originalname)}`;
+// Upload file to Google Cloud Storage
+const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
+  const gcsFileName = `media/${Date.now()}-${encodeURIComponent(originalname)}`;
   const mediaBlob = cloudBucket.file(gcsFileName);
-  
-  const mediaStreamUpload = mediaBlob.createWriteStream({
-    metadata: {
-      contentType: mimetype,
-    },
-    resumable: true, // Enable resumable uploads for large files
-  });
 
   return new Promise((resolve, reject) => {
-    file.stream.pipe(mediaStreamUpload)
-      .on('error', (err) => {
-        console.error('Error uploading to Google Cloud:', err);
-        reject(new Error('Failed to upload video.'));
-      })
+    const mediaStreamUpload = mediaBlob.createWriteStream({
+      metadata: { contentType: mimetype },
+      resumable: true,
+    });
+
+    fileStream
+      .pipe(mediaStreamUpload)
+      .on('error', (err) => reject(new Error('Failed to upload to GCS: ' + err.message)))
       .on('finish', () => {
-        const publicUrl = `https://storage.googleapis.com/${process.env.BUCKET_NAME}/${gcsFileName}`;
+        const publicUrl = `https://storage.googleapis.com/${cloudBucket.name}/${gcsFileName}`;
         resolve(publicUrl);
       });
   });
 };
 
-
-// Main function to process file uploads
+// Process file upload (supports videos and other media types)
 const processFileUpload = async (file, body, user) => {
-  const { mimetype, buffer, originalname } = file; // Use buffer directly from multer
+  const { mimetype, buffer, originalname } = file;
   const ext = path.extname(originalname).toLowerCase();
   const mediaType = getMediaType(ext);
   const owner = user ? user.id : null;
 
-  if (mediaType === 'video') {
-    try {
-      // Convert buffer to a readable stream
+  try {
+    if (mediaType === 'video') {
+      // Upload video to Google Cloud Storage
       const fileStream = Readable.from(buffer);
       const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
+
       const videoData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
@@ -126,13 +161,11 @@ const processFileUpload = async (file, body, user) => {
       };
 
       const mediaId = await createOrUpdateMedia(videoData);
+      // Cleanup temporary file if needed
+      await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
       return mediaId;
-    } catch (error) {
-      console.error('Failed to upload video to Google Cloud:', error);
-      throw new Error('Failed to upload video.');
-    }
-  } else {
-    try {
+    } else {
+      // Handle non-video media types (e.g., image, document, etc.)
       const uploadStream = getBucket().openUploadStream(originalname, {
         contentType: mimetype,
         metadata: { mediaType },
@@ -140,7 +173,7 @@ const processFileUpload = async (file, body, user) => {
 
       await new Promise((resolve, reject) => {
         pipeline(
-          Readable.from(buffer), // Convert buffer to a stream
+          Readable.from(buffer),
           uploadStream,
           (err) => {
             if (err) {
@@ -163,12 +196,18 @@ const processFileUpload = async (file, body, user) => {
       };
 
       const mediaId = await createOrUpdateMedia(mediaData);
+      // Cleanup temporary file if needed
+      await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
       return mediaId;
-    } catch (error) {
-      console.error('Error uploading file to MongoDB, falling back to Google Cloud Storage:', error);
+    }
+  } catch (error) {
+    console.error('Error in file upload process:', error);
 
-      const fileStream = Readable.from(buffer); // Convert buffer to stream for fallback
+    // In case of failure, attempt fallback to Google Cloud Storage
+    try {
+      const fileStream = Readable.from(buffer);
       const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
+
       const fallbackMediaData = {
         fileName: body.fileName || originalname,
         altText: body.altText || '',
@@ -178,18 +217,19 @@ const processFileUpload = async (file, body, user) => {
         mediaType,
       };
 
-      try {
-        const mediaId = await createOrUpdateMedia(fallbackMediaData);
-        return mediaId;
-      } catch (fallbackError) {
-        console.error('Failed to save Google Cloud URL in MongoDB:', fallbackError);
-        throw new Error('Failed to upload media to both MongoDB and Google Cloud Storage.');
-      }
+      const mediaId = await createOrUpdateMedia(fallbackMediaData);
+      // Cleanup temporary file if needed
+      await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
+      return mediaId;
+    } catch (fallbackError) {
+      console.error('Fallback upload failed:', fallbackError);
+      throw new Error('Failed to upload media to both MongoDB and Google Cloud Storage.');
     }
   }
 };
 
-// Middleware to dynamically handle uploads
+
+// Middleware for handling file uploads dynamically
 const dynamicUpload = (req, res, next) => {
   const fieldName = req.body.fieldName || 'file';
   const multerUpload = upload.single(fieldName);
