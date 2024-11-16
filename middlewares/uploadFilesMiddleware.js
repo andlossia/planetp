@@ -1,8 +1,8 @@
 const { Readable, pipeline } = require('stream');
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
-const fs = require('fs'); 
-const fsPromises = require('fs').promises; 
+const fs = require('fs');
+const fsPromises = require('fs').promises;  // Promises version of fs
 const dotenv = require('dotenv');
 const multer = require('multer');
 const Media = require('../models/mediaModel');
@@ -73,13 +73,16 @@ const fileFilter = (req, file, cb) => {
   cb(null, true);
 };
 
-
 // Configure Multer storage to save files temporarily on disk
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadPath = path.join('uploads', req.user.id || 'default');
-    await fs.mkdir(uploadPath, { recursive: true });
-    cb(null, uploadPath);
+    try {
+      await fsPromises.mkdir(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (err) {
+      cb(err);  // Pass any error to the callback
+    }
   },
   filename: (req, file, cb) => {
     cb(null, `${Date.now()}-${sanitizeFilename(file.originalname)}`);
@@ -99,7 +102,7 @@ const sanitizeFilename = (name) => name.replace(/[^a-zA-Z0-9.-_]/g, '_');
 // Delete temporary files after processing
 const cleanupFile = async (filePath) => {
   try {
-    await fs.unlink(filePath);
+    await fsPromises.unlink(filePath);
     console.log(`Temporary file ${filePath} deleted.`);
   } catch (err) {
     console.error(`Failed to delete file ${filePath}:`, err.message);
@@ -238,8 +241,6 @@ const processFileUpload = async (file, body, user) => {
     }
   }
 };
-
-
 
 // Middleware for handling file uploads dynamically
 const dynamicUpload = (req, res, next) => {
