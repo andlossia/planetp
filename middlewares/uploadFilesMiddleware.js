@@ -59,17 +59,19 @@ const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const mediaType = getMediaType(ext);
 
+  // Check if the file extension is supported
   if (!Object.values(mediaExtensions).flat().includes(ext)) {
     return cb(new Error('Invalid file type.'));
   }
 
   const sizeLimit = fileSizeLimits[mediaType];
-  if (req.file.size > sizeLimit) {
+  if (file.size > sizeLimit) {  // Corrected here: use file.size, not req.file.size
     return cb(new Error(`File size exceeds the limit for ${mediaType}.`));
   }
 
   cb(null, true);
 };
+
 
 // Configure Multer storage to save files temporarily on disk
 const storage = multer.diskStorage({
@@ -162,7 +164,9 @@ const processFileUpload = async (file, body, user) => {
 
       const mediaId = await createOrUpdateMedia(videoData);
       // Cleanup temporary file if needed
-      await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
+      if (file.path) {
+        await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
+      }
       return mediaId;
     } else {
       // Handle non-video media types (e.g., image, document, etc.)
@@ -197,7 +201,9 @@ const processFileUpload = async (file, body, user) => {
 
       const mediaId = await createOrUpdateMedia(mediaData);
       // Cleanup temporary file if needed
-      await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
+      if (file.path) {
+        await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
+      }
       return mediaId;
     }
   } catch (error) {
