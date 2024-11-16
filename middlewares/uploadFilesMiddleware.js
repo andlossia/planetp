@@ -149,7 +149,11 @@ const processFileUpload = async (file, body, user) => {
 
   try {
     if (mediaType === 'video') {
-      // Upload video to Google Cloud Storage
+      // Ensure buffer exists before proceeding
+      if (!buffer) {
+        throw new Error('No buffer available for video upload.');
+      }
+
       const fileStream = Readable.from(buffer);
       const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
 
@@ -163,13 +167,14 @@ const processFileUpload = async (file, body, user) => {
       };
 
       const mediaId = await createOrUpdateMedia(videoData);
-      // Cleanup temporary file if needed
-      if (file.path) {
-        await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
-      }
+      await cleanupFile(file.path); // Cleanup temp file if needed
       return mediaId;
     } else {
       // Handle non-video media types (e.g., image, document, etc.)
+      if (!buffer && !file.path) {
+        throw new Error('No buffer or path available for file upload.');
+      }
+
       const uploadStream = getBucket().openUploadStream(originalname, {
         contentType: mimetype,
         metadata: { mediaType },
@@ -177,12 +182,11 @@ const processFileUpload = async (file, body, user) => {
 
       await new Promise((resolve, reject) => {
         pipeline(
-          Readable.from(buffer),
+          buffer ? Readable.from(buffer) : fs.createReadStream(file.path),
           uploadStream,
           (err) => {
             if (err) {
-              console.error('Error uploading file to MongoDB:', err);
-              reject(new Error('Error uploading file.'));
+              reject(new Error('Error uploading file to MongoDB.'));
             } else {
               resolve();
             }
@@ -200,18 +204,19 @@ const processFileUpload = async (file, body, user) => {
       };
 
       const mediaId = await createOrUpdateMedia(mediaData);
-      // Cleanup temporary file if needed
-      if (file.path) {
-        await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
-      }
+      await cleanupFile(file.path); // Cleanup temp file if needed
       return mediaId;
     }
   } catch (error) {
     console.error('Error in file upload process:', error);
 
-    // In case of failure, attempt fallback to Google Cloud Storage
+    // Attempt fallback upload if primary upload fails
     try {
-      const fileStream = Readable.from(buffer);
+      if (!buffer && !file.path) {
+        throw new Error('No file data available for fallback upload.');
+      }
+
+      const fileStream = buffer ? Readable.from(buffer) : fs.createReadStream(file.path);
       const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
 
       const fallbackMediaData = {
@@ -224,8 +229,7 @@ const processFileUpload = async (file, body, user) => {
       };
 
       const mediaId = await createOrUpdateMedia(fallbackMediaData);
-      // Cleanup temporary file if needed
-      await cleanupFile(file.path); // Ensure this is only called if `file.path` exists
+      await cleanupFile(file.path); // Cleanup temp file if needed
       return mediaId;
     } catch (fallbackError) {
       console.error('Fallback upload failed:', fallbackError);
@@ -233,6 +237,7 @@ const processFileUpload = async (file, body, user) => {
     }
   }
 };
+
 
 
 // Middleware for handling file uploads dynamically
