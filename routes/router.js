@@ -39,4 +39,5 @@ router.use('/users', createCrudRoutes(userController));
 
 router.post('/send-massage', massageController.sendMassage);
 
+
 module.exports = router;
