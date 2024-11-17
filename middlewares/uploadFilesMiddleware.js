@@ -1,5 +1,5 @@
 const { Readable, pipeline } = require('stream');
-const { Storage } = require('@google-cloud/storage');
+const { cloudBucket } = require('../utils/googleCloudStorage');
 const path = require('path');
 const fs = require('fs');
 const fsPromises = require('fs').promises;  // Promises version of fs
@@ -7,24 +7,12 @@ const dotenv = require('dotenv');
 const multer = require('multer');
 const Media = require('../models/mediaModel');
 const { getBucket } = require('../database');
+const { console } = require('inspector');
 
 dotenv.config();
 
-// Parse Google Cloud credentials from environment variables
-const credentials = JSON.parse(Buffer.from(process.env.KEYFILENAME, 'base64').toString('utf8'));
 
-// Initialize Google Cloud Storage
-const videoStorage = new Storage({
-  projectId: credentials.project_id,
-  credentials: {
-    client_email: credentials.client_email,
-    private_key: credentials.private_key,
-  },
-});
 
-const cloudBucket = videoStorage.bucket(process.env.BUCKET_NAME);
-
-// Define supported media types and their extensions
 const mediaExtensions = {
   image: ['.png', '.jpg', '.gif', '.jpeg', '.bmp', '.svg', '.webp'],
   video: ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'],
@@ -60,13 +48,12 @@ const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const mediaType = getMediaType(ext);
 
-  // Check if the file extension is supported
   if (!Object.values(mediaExtensions).flat().includes(ext)) {
     return cb(new Error('Invalid file type.'));
   }
 
   const sizeLimit = fileSizeLimits[mediaType];
-  if (file.size > sizeLimit) {  // Corrected here: use file.size, not req.file.size
+  if (file.size > sizeLimit) {  
     return cb(new Error(`File size exceeds the limit for ${mediaType}.`));
   }
 
@@ -153,9 +140,9 @@ const processFileUpload = async (file, body, user) => {
 
   try {
     if (mediaType === 'video') {
-      // Ensure buffer exists before proceeding
+      // Handle video upload
       if (!buffer) {
-        throw new Error('No buffer available for video upload.');
+        console.log('No buffer available for video upload.');
       }
 
       const fileStream = Readable.from(buffer);
