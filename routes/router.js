@@ -1,9 +1,12 @@
 const express = require('express');
 const createCrudRoutes = require('./crudRoutes');
+const { validatePaymentRequest } = require('../middlewares/validatePaymentRequest');
+const { authenticate } = require('../middlewares/authenticationMiddleware');
+const { processPayment } = require('../controllers/crud/custom/paymentMethod');
+
 const router = express.Router();
 
 const authRoutes = require('./authRoute');
-
 const articleController = require('../controllers/articleController');
 const breedController = require('../controllers/breedController');
 const categoryController = require('../controllers/categoryController');
@@ -20,6 +23,7 @@ const sectionController = require('../controllers/sectionController');
 const staticPageController = require('../controllers/staticPageController');
 const tagController = require('../controllers/tagController');
 const userController = require('../controllers/userController');
+
 
 router.use('/', authRoutes);
 router.use('/articles', createCrudRoutes(articleController));
@@ -40,6 +44,7 @@ router.use('/tags', createCrudRoutes(tagController));
 router.use('/users', createCrudRoutes(userController));
 
 router.post('/send-massage', massageController.sendMassage);
+router.post('/process-payment', authenticate, validatePaymentRequest, processPayment);
 
 
 module.exports = router;
