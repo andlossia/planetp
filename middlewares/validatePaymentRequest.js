@@ -1,22 +1,47 @@
-const { body, validationResult } = require('express-validator');
+const validatePaymentRequest = (req, res, next) => {
+    const {
+        course,
+        expire_month,
+        expire_year,
+        cvv,
+        card_holder_id,
+        card_number,
+    } = req.body;
 
-const validatePaymentRequest = [
-    body('course').isMongoId().withMessage('Invalid course ID'),
-    body('paymentDetails.card_holder_name').isLength({ min: 3 }).withMessage('Invalid card holder name'),
-    body('paymentDetails.card_holder_id').isLength({ min: 7, max: 9 }).withMessage('Invalid customer ID'),
-    body('paymentDetails.card_number').isCreditCard().withMessage('Invalid card number'),
-    body('paymentDetails.expire_month').isLength({ min: 2, max: 2 }).withMessage('Invalid expiration month'),
-    body('paymentDetails.expire_year').isLength({ min: 4, max: 4 }).withMessage('Invalid expiration year'),
-    body('paymentDetails.cvv').isLength({ min: 3, max: 4 }).withMessage('Invalid CVV'),
-    (req, res, next) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-        next();
+    // Validate course ID
+    if (!course || typeof course !== "string" || course.trim() === "") {
+        return res.status(400).json({ message: "Invalid or missing course ID." });
     }
-];
+
+    // Validate expire_month: must be between 1 and 12
+    if (!Number.isInteger(expire_month) || expire_month < 1 || expire_month > 12) {
+        return res.status(400).json({ message: "Invalid expire_month." });
+    }
+
+    // Validate expire_year: must be current year or within 20 years
+    const currentYear = new Date().getFullYear();
+    if (!Number.isInteger(expire_year) || expire_year < currentYear || expire_year > currentYear + 20) {
+        return res.status(400).json({ message: "Invalid expire_year." });
+    }
+
+    // Validate CVV: must be a valid 3-4 digit string
+    if (!cvv || !/^\d{3,4}$/.test(cvv.toString())) {
+        return res.status(400).json({ message: "Invalid CVV." });
+    }
+
+    // Validate card_holder_id: must be a valid 9-digit number
+    if (!card_holder_id || !/^\d{9}$/.test(card_holder_id.toString())) {
+        return res.status(400).json({ message: "Invalid card_holder_id." });
+    }
+
+    // Validate card_number: must be a valid 8-19 digit number
+    if (!card_number || !/^\d{8,19}$/.test(card_number.toString())) {
+        return res.status(400).json({ message: "Invalid card_number." });
+    }
+
+    next();
+};
 
 module.exports = {
-    validatePaymentRequest
+    validatePaymentRequest,
 };
