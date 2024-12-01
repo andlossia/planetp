@@ -4,7 +4,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const {connectToDatabase} = require('./database');
 const responseHandler = require('./middlewares/handlingMiddleware');
-
+const { handleOAuthCallback } = require('./services/smtp/email/emailSender');
 dotenv.config();
 const app = express();
 
@@ -33,6 +33,17 @@ app.use('/', require('./routes/media'));
 app.get('/', (req, res) => {
   res.send('<h1>Hello World</h1>');
 });
+
+app.get('/oauth2callback', async (req, res) => {
+  const { code } = req.query; // The authorization code from Google
+  try {
+    const tokens = await handleOAuthCallback(code);
+    res.status(200).json({ tokens }); // Or redirect to your app with the token info
+  } catch (error) {
+    res.status(400).json({ message: 'Error handling OAuth callback', error });
+  }
+});
+
 
 app.use('/api/v1', require('./routes/router'));
 
