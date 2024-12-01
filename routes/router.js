@@ -44,7 +44,7 @@ router.use('/tags', createCrudRoutes(tagController));
 router.use('/users', createCrudRoutes(userController));
 
 router.post('/send-massage', massageController.sendMassage);
-router.post('/process-payment', authenticate, validatePaymentRequest, processPayment);
+router.post('/process-payment', validatePaymentRequest, authenticate, processPayment);
 
 
 module.exports = router;
